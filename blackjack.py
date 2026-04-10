@@ -2,11 +2,92 @@
 """
 Blackjack — cross-platform (Windows, macOS, Linux)
 Requires: Python 3.8+ with tkinter (included in standard Python installs)
+Optional: pip install pygame  (enables sound effects)
 """
 
 import tkinter as tk
 from tkinter import font as tkfont
 import random
+import io
+import wave
+import struct
+import math
+import sys
+import threading
+import subprocess
+
+
+# ── Sound engine ───────────────────────────────────────────
+
+class Sounds:
+    """
+    Generates tones from pure Python math — no sound files, no extra installs.
+    Plays via winsound (Windows), afplay (macOS), or aplay (Linux).
+    """
+    RATE = 22050
+
+    def __init__(self):
+        self._lib = {}
+        try:
+            self._lib = {
+                "deal":      self._tone(600,  0.08),
+                "hit":       self._tone(480,  0.08),
+                "win":       self._seq([(523, 0.12), (659, 0.12), (784, 0.22)]),
+                "blackjack": self._seq([(523, 0.09), (659, 0.09), (784, 0.09), (1047, 0.32)]),
+                "lose":      self._seq([(330, 0.18), (247, 0.32)]),
+                "bust":      self._tone(140,  0.38),
+                "push":      self._tone(440,  0.25),
+            }
+        except Exception:
+            pass
+
+    def play(self, name):
+        wav = self._lib.get(name)
+        if wav:
+            threading.Thread(target=self._play, args=(wav,), daemon=True).start()
+
+    def _play(self, wav_bytes):
+        try:
+            if sys.platform == "win32":
+                import winsound
+                winsound.PlaySound(wav_bytes, winsound.SND_MEMORY)
+            elif sys.platform == "darwin":
+                import tempfile, os
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    f.write(wav_bytes); path = f.name
+                subprocess.run(["afplay", path], capture_output=True)
+                os.unlink(path)
+            else:
+                import tempfile, os
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    f.write(wav_bytes); path = f.name
+                subprocess.run(["aplay", "-q", path], capture_output=True)
+                os.unlink(path)
+        except Exception:
+            pass
+
+    def _pcm(self, freq, duration, volume=0.4):
+        n = int(self.RATE * duration)
+        return struct.pack(
+            "<" + "h" * n,
+            *[int(32767 * volume
+                  * math.sin(2 * math.pi * freq * i / self.RATE)
+                  * max(0.0, 1 - i / n))
+              for i in range(n)]
+        )
+
+    def _wav(self, pcm):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(self.RATE)
+            w.writeframes(pcm)
+        return buf.getvalue()
+
+    def _tone(self, freq, duration, volume=0.4):
+        return self._wav(self._pcm(freq, duration, volume))
+
+    def _seq(self, notes, volume=0.4):
+        return self._wav(b"".join(self._pcm(f, d, volume) for f, d in notes))
 
 # ── Constants ──────────────────────────────────────────────
 SUITS     = ["♠", "♥", "♦", "♣"]
@@ -164,8 +245,9 @@ class BlackjackGame:
 
 class BlackjackApp:
     def __init__(self, root: tk.Tk):
-        self.root = root
-        self.game = BlackjackGame()
+        self.root   = root
+        self.game   = BlackjackGame()
+        self.sounds = Sounds()
 
         root.title("Blackjack")
         root.configure(bg=BG)
@@ -249,12 +331,14 @@ class BlackjackApp:
         if bet > self.game.chips:
             self.status_var.set("Not enough chips!")
             return
+        self.sounds.play("deal")
         self.game.start_round(bet)
         self._update()
         if self.game.state == "done":
             self._finish()
 
     def _hit(self):
+        self.sounds.play("hit")
         self.game.hit()
         self._update()
         if self.game.state == "done":
@@ -266,12 +350,24 @@ class BlackjackApp:
         self._finish()
 
     def _double(self):
+        self.sounds.play("hit")
         self.game.double_down()
         self._update()
         self._finish()
 
     def _finish(self):
-        msg, _ = self.game.result()
+        msg, amount = self.game.result()
+        # Play result sound
+        if "Blackjack" in msg and amount > 0:
+            self.sounds.play("blackjack")
+        elif "Bust" in msg and amount < 0:
+            self.sounds.play("bust")
+        elif amount > 0:
+            self.sounds.play("win")
+        elif amount < 0:
+            self.sounds.play("lose")
+        else:
+            self.sounds.play("push")
         self.status_var.set(msg)
         self._update()
         if self.game.chips <= 0:
