@@ -311,7 +311,9 @@ class BlackjackApp:
                 bg=BTN_BG, fg=BTN_FG, activebackground=BTN_ACT,
                 activeforeground=BTN_FG, relief="flat",
                 font=("Helvetica", 12, "bold"),
-                padx=14, pady=6, cursor="hand2"
+                padx=14, pady=6, cursor="hand2",
+                highlightbackground=BG, highlightthickness=0,
+                disabledforeground="#4a7a4e"
             )
             b.pack(side="left", padx=6)
             if var is not None:
@@ -382,6 +384,7 @@ class BlackjackApp:
         self._draw_table()
         self._update_buttons()
         self.chips_var.set(f"${self.game.chips}")
+        self.canvas.update_idletasks()
 
     def _update_buttons(self):
         s = self.game.state
@@ -460,7 +463,10 @@ class BlackjackApp:
 
 def main():
     root = tk.Tk()
-    BlackjackApp(root)
+    root.geometry("640x480")
+    app = BlackjackApp(root)
+    root.update_idletasks()
+    root.update()
     root.mainloop()
 
 
